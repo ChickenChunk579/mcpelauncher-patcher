@@ -1,0 +1,47 @@
+From ec3541aa99ce43143659346a4045e9470b41f5f1 Mon Sep 17 00:00:00 2001
+From: Rhys Tumelty <rhys@tumelty.co.uk>
+Date: Fri, 9 Oct 2026 19:01:31 +0000
+Subject: [PATCH] Add pthread_sigmask and ldiv to the libc shim
+
+Minecraft 26.52's libminecraftpe.so references pthread_sigmask and ldiv,
+neither of which was provided by libc-shim. Loading the game failed with:
+
+  dlopen failed: cannot locate symbol "pthread_sigmask" referenced by
+  ".../libminecraftpe.so"...
+
+These symbols were previously worked around by patchelf-injecting a
+custom libshim.so into every game library. Register them in the shim
+instead so no library injection is required.
+
+pthread_sigmask is stubbed to return 0, mirroring the other signal
+functions in the shim (the real implementations corrupt the stack, see
+issue #9). ldiv forwards to the host implementation.
+---
+ src/common.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/common.cpp b/src/common.cpp
+index 2ef6d95..2d197a2 100644
+--- a/src/common.cpp
++++ b/src/common.cpp
+@@ -567,6 +567,7 @@ void shim::add_stdlib_shimmed_symbols(std::vector<shim::shimmed_symbol> &list) {
+         {"atoi", atoi},
+         {"atol", atol},
+         {"atoll", atoll},
++        {"ldiv", ::ldiv},
+         {"strtod", ARMHFREWRITE(WithErrnoUpdate(strtod))},
+         {"strtof", ARMHFREWRITE(WithErrnoUpdate(strtof))},
+         {"strtold", ARMHFREWRITE(WithErrnoUpdate(strtold))},
+@@ -860,6 +861,9 @@ void shim::add_signal_shimmed_symbols(std::vector<shim::shimmed_symbol> &list) {
+         }},
+         {"sigdelset", +[](void *__set, int __signo) -> int {
+             return 0;
++        }},
++        {"pthread_sigmask", +[](int __how, const void * __set, void * __oset) -> int {
++            return 0;
+         }}
+     });
+ }
+-- 
+2.56.0
+

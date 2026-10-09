@@ -1,0 +1,172 @@
+From 75d90dacd8996ffa3197344980485cb206bb2fad Mon Sep 17 00:00:00 2001
+From: Rhys Tumelty <rhys@tumelty.co.uk>
+Date: Thu, 8 Oct 2026 21:06:20 +0000
+Subject: [PATCH] Implement getTotalSpace and report real storage space
+
+Minecraft 26.52 calls MainActivity.getTotalSpace, which was never
+registered in the native descriptor. The JNI call fell through to the
+default and returned 0, so the game displayed "0 bytes free of 0 bytes
+total" and was effectively unplayable.
+
+Register getTotalSpace and implement it, along with
+calculateAvailableDiskFreeSpace, getUsableSpace and getAllocatableBytes,
+using std::filesystem::space. Guest paths are translated to host paths
+the same way libc-shim's iorewrite0 does, with a fallback to the
+storage directory when the queried path does not resolve.
+
+If no candidate path can be queried, each method falls back to the
+previous 1 TiB constant, preserving the existing >432MB Marketplace
+workaround.
+---
+ src/jni/jni_descriptors.cpp |  1 +
+ src/jni/main_activity.cpp   | 81 +++++++++++++++++++++++++++++++++++--
+ src/jni/main_activity.h     | 13 +++---
+ 3 files changed, 86 insertions(+), 9 deletions(-)
+
+diff --git a/src/jni/jni_descriptors.cpp b/src/jni/jni_descriptors.cpp
+index ebf8903..ac40115 100644
+--- a/src/jni/jni_descriptors.cpp
++++ b/src/jni/jni_descriptors.cpp
+@@ -141,6 +141,7 @@ BEGIN_NATIVE_DESCRIPTOR(MainActivity){Constructor<MainActivity>{}},
+     {Function<&MainActivity::getAllocatableBytes>{}, "getAllocatableBytes"},
+     {Function<&MainActivity::calculateAvailableDiskFreeSpace>{}, "calculateAvailableDiskFreeSpace"},
+     {Function<&MainActivity::getUsableSpace>{}, "getUsableSpace"},
++    {Function<&MainActivity::getTotalSpace>{}, "getTotalSpace"},
+     END_NATIVE_DESCRIPTOR
+ 
+     BEGIN_NATIVE_DESCRIPTOR(TextInputState)
+diff --git a/src/jni/main_activity.cpp b/src/jni/main_activity.cpp
+index e9e636c..0f8ebbc 100644
+--- a/src/jni/main_activity.cpp
++++ b/src/jni/main_activity.cpp
+@@ -18,6 +18,9 @@
+ #include <climits>
+ #include <sstream>
+ #include <fstream>
++#include <filesystem>
++#include <vector>
++#include <libc_shim.h>
+ #include <android/keycodes.h>
+ #include "../core_patches.h"
+ 
+@@ -288,10 +291,82 @@ FakeJni::JBoolean MainActivity::supportsSizeQuery(std::shared_ptr<FakeJni::JStri
+     return true;
+ }
+ 
++// Used when no space information can be determined at all, keeps the historical behavior
++static const long long storageUnknownSpaceFallback = 1024LL * 1024LL * 1024LL * 1024LL;
++
++// Same path translation as libc-shim's iorewrite0, so guest paths such as
++// /data/data/com.mojang.minecraftpe/... resolve to the real host directory
++static std::string rewriteStoragePath(std::string const& path) {
++    if(path.empty() || path[0] != '/')
++        return path;
++    for(auto&& kv : shim::rewrite_filesystem_access) {
++        if(kv.first == ".")
++            continue;
++        if(path.size() >= kv.first.size() && !path.compare(0, kv.first.size(), kv.first) && kv.second.rfind(kv.first, 0))
++            return kv.second + path.substr(kv.first.length());
++    }
++    return path;
++}
++
++bool MainActivity::queryDiskSpace(std::shared_ptr<FakeJni::JString> path, long long& total, long long& avail) {
++    total = 0;
++    avail = 0;
++    std::vector<std::string> candidates;
++    if(path) {
++        std::string raw = path->asStdString();
++        if(!raw.empty()) {
++            std::string rewritten = rewriteStoragePath(raw);
++            candidates.push_back(rewritten);
++            if(rewritten != raw)
++                candidates.push_back(raw);
++        }
++    }
++    // The queried path may not exist on the host (e.g. /internal, /external)
++    if(!storageDirectory.empty())
++        candidates.push_back(storageDirectory);
++    candidates.push_back(".");
++    for(auto const& candidate : candidates) {
++        std::error_code ec;
++        auto space = std::filesystem::space(candidate, ec);
++        if(ec)
++            continue;
++        total = (long long) space.capacity;
++        avail = (long long) space.available;
++        return true;
++    }
++    return false;
++}
++
++FakeJni::JLong MainActivity::getTotalSpace(std::shared_ptr<FakeJni::JString> str) {
++    long long total = 0;
++    long long avail = 0;
++    if(!queryDiskSpace(str, total, avail))
++        return storageUnknownSpaceFallback;
++    return total;
++}
++
++FakeJni::JLong MainActivity::calculateAvailableDiskFreeSpace(std::shared_ptr<FakeJni::JString> str) {
++    long long total = 0;
++    long long avail = 0;
++    if(!queryDiskSpace(str, total, avail))
++        return storageUnknownSpaceFallback;
++    return avail;
++}
++
++FakeJni::JLong MainActivity::getUsableSpace(std::shared_ptr<FakeJni::JString> str) {
++    long long total = 0;
++    long long avail = 0;
++    if(!queryDiskSpace(str, total, avail))
++        return storageUnknownSpaceFallback;
++    return avail;
++}
++
+ FakeJni::JLong MainActivity::getAllocatableBytes(std::shared_ptr<FakeJni::JString> path) {
+-    // const char* rpath = path->data();
+-    // printf("getAllocatableBytes: %s\n", rpath);
+-    return 1024LL * 1024LL * 1024LL * 1024LL;
++    long long total = 0;
++    long long avail = 0;
++    if(!queryDiskSpace(path, total, avail))
++        return storageUnknownSpaceFallback;
++    return avail;
+ }
+ 
+ void MainActivity::startPlayIntegrityCheck() {
+diff --git a/src/jni/main_activity.h b/src/jni/main_activity.h
+index 966b3ed..203ba45 100644
+--- a/src/jni/main_activity.h
++++ b/src/jni/main_activity.h
+@@ -107,6 +107,9 @@ private:
+     bool ignoreNextHideKeyboard = false;
+     FakeJni::JInt lastChar = 0;
+ 
++    // Resolves the total/available space of the filesystem holding the given (guest) path
++    bool queryDiskSpace(std::shared_ptr<FakeJni::JString> path, long long& total, long long& avail);
++
+ public:
+     unsigned char *(*stbi_load_from_memory)(unsigned char const *buffer, int len, int *x, int *y, int *channels_in_file, int desired_channels);
+     void (*stbi_image_free)(void *retval_from_stbi_load);
+@@ -273,13 +276,11 @@ public:
+ 
+     void setCaretPosition(FakeJni::JInt pos);
+ 
+-    FakeJni::JLong calculateAvailableDiskFreeSpace(std::shared_ptr<FakeJni::JString> str) {
+-        return 1024LL * 1024LL * 1024LL * 1024LL;
+-    }
++    FakeJni::JLong calculateAvailableDiskFreeSpace(std::shared_ptr<FakeJni::JString> str);
+ 
+-    FakeJni::JLong getUsableSpace(std::shared_ptr<FakeJni::JString> str) {
+-        return 1024LL * 1024LL * 1024LL * 1024LL;
+-    }
++    FakeJni::JLong getUsableSpace(std::shared_ptr<FakeJni::JString> str);
++
++    FakeJni::JLong getTotalSpace(std::shared_ptr<FakeJni::JString> str);
+ 
+     FakeJni::JInt getCaretPosition();
+ 
+-- 
+2.56.0
+
