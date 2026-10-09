@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+BASE=$(pwd)
+
 echo compiling libshim
 clang -fPIC -shared -nostdlib shim.c -o libshim.so
 echo backing up libplayfabmultiplayer.so
@@ -20,5 +22,7 @@ for sofile in ./*.so; do
 done
 echo reverting to old libPlayFabMultiplayer.so
 rm libPlayFabMultiplayer.so
-cp ../../../libPlayFabMultiplayer.so .
+
+cd $BASE
+cp $BASE/libPlayFabMultiplayer.so $1/lib/x86_64/libPlayFabMultiplayer.so
 echo done!
