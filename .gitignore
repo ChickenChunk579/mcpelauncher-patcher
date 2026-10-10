@@ -1,0 +1,5 @@
+# Default checkout created by patch.sh
+/mcpelauncher-manifest/
+
+# Meson build directories
+launcher/build/

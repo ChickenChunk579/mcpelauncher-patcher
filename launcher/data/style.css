@@ -1,0 +1,17 @@
+/* MCPE Launcher custom styles */
+.version-row {
+  margin: 6px 12px;
+}
+
+.version-title {
+  font-weight: 700;
+}
+
+.version-subtitle {
+  color: alpha(currentColor, 0.65);
+}
+
+.install-file-label {
+  font-size: 12px;
+  color: alpha(currentColor, 0.7);
+}

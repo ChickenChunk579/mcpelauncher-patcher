@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=MCPE Launcher
+GenericName=Minecraft: Bedrock Edition Launcher
+Comment=Manage and launch Minecraft Bedrock versions with mcpelauncher-client
+Comment[en_GB]=Manage and launch Minecraft Bedrock versions with mcpelauncher-client
+Exec=mcpe-launcher
+Icon=dev.rhys.mcpe-launcher
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=Minecraft;MCPE;Bedrock;Launcher;APK;
+StartupNotify=true

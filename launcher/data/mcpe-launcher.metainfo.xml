@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.rhys.mcpe-launcher</id>
+  <name>MCPE Launcher</name>
+  <summary>Manage and launch Minecraft: Bedrock Edition versions</summary>
+  <description>
+    <p>A GTK4/libadwaita launcher for mcpelauncher-client. It lets you install several
+       Minecraft: Bedrock Edition APKs side by side, validates each one (package name and
+       x86_64 native binaries), extracts it and launches it with mcpelauncher-client.</p>
+  </description>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer_name>rhys</developer_name>
+  <url type="homepage">https://github.com/rhys/mcpelauncher-patcher</url>
+  <launchable type="desktop-id">mcpe-launcher.desktop</launchable>
+  <provides>
+    <binary>mcpe-launcher</binary>
+  </provides>
+</component>
