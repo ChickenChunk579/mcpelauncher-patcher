@@ -588,6 +588,8 @@ static void on_confirm_response(AdwAlertDialog *dlg, const char *response,
     adw_dialog_close(ADW_DIALOG(dlg));
 }
 
+static AdwDialog *g_test_dialog = NULL; /* TEMP DEBUG */
+
 static void confirm_prompt(AppContext *ctx, const char *path,
                            const ApkInfo *info, Version *replace)
 {
@@ -636,6 +638,7 @@ static void confirm_prompt(AppContext *ctx, const char *path,
                           confirm_data_destroy, G_CONNECT_DEFAULT);
     g_signal_connect(dlg, "closed", G_CALLBACK(on_dialog_closed), NULL);
     adw_dialog_present(ADW_DIALOG(dlg), GTK_WIDGET(ctx->win));
+    g_test_dialog = ADW_DIALOG(dlg); /* TEMP DEBUG */
 }
 
 static void validate_apk(AppContext *ctx, const char *path)
@@ -662,6 +665,31 @@ static void validate_apk(AppContext *ctx, const char *path)
     confirm_prompt(ctx, path, &info, existing);
     apk_info_free(&info);
 }
+
+/* ---- TEMP DEBUG: MCPE_TEST_APK hook ---- */
+static gboolean mcpe_test_auto_click(gpointer data)
+{
+    (void)data;
+    if (g_test_dialog) {
+        g_printerr("TESTHOOK: emitting install response\n");
+        g_signal_emit_by_name(g_test_dialog, "response", "install");
+    }
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean mcpe_test_hook(gpointer data)
+{
+    AppContext *ctx = data;
+    const char *apk = g_getenv("MCPE_TEST_APK");
+    if (!apk || !*apk)
+        return G_SOURCE_REMOVE;
+    g_printerr("TESTHOOK: validate_apk(%s)\n", apk);
+    validate_apk(ctx, apk);
+    if (g_getenv("MCPE_TEST_AUTO"))
+        g_timeout_add(700, mcpe_test_auto_click, NULL);
+    return G_SOURCE_REMOVE;
+}
+/* ---- end TEMP DEBUG ---- */
 
 /* ---- extraction thread ---- */
 
@@ -1161,6 +1189,8 @@ static void on_activate(GApplication *app, gpointer user_data)
     if (!ctx->win)
         build_window(ctx);
     gtk_window_present(GTK_WINDOW(ctx->win));
+    if (g_getenv("MCPE_TEST_APK"))
+        g_timeout_add(1200, mcpe_test_hook, ctx);
 }
 
 static void app_context_free(AppContext *ctx)
